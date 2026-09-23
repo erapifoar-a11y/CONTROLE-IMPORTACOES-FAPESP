@@ -24,7 +24,7 @@ from pypdf import PdfReader, PdfWriter
 
 
 APP_NAME = "Controle de Importações FAPESP"
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 WEB_DIR = ROOT / "web"
 if os.environ.get("CONTROLE_IMPORTACOES_DATA"):
@@ -654,6 +654,67 @@ def make_backup() -> Path:
     return target
 
 
+def save_dialog_path(result: object) -> Path | None:
+    """Normaliza o retorno do diálogo do pywebview entre versões/plataformas."""
+    if not result:
+        return None
+    if isinstance(result, (list, tuple)):
+        if not result:
+            return None
+        result = result[0]
+    return Path(str(result))
+
+
+class DesktopApi:
+    def __init__(self) -> None:
+        self.window = None
+
+    def save_document(self, document_id: int) -> dict[str, object]:
+        with connect() as con:
+            row = con.execute("SELECT * FROM documents WHERE id=?", (int(document_id),)).fetchone()
+        if not row:
+            return {"ok": False, "error": "Documento não encontrado."}
+        source = DOCS_DIR / f"importacao_{row['import_id']:06d}" / row["stored_name"]
+        if not source.exists():
+            return {"ok": False, "error": "O arquivo do documento não foi encontrado."}
+        try:
+            import webview  # type: ignore
+
+            selected = self.window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=Path(row["original_name"]).name,
+            )
+            destination = save_dialog_path(selected)
+            if destination is None:
+                return {"ok": False, "cancelled": True}
+            shutil.copy2(source, destination)
+            return {"ok": True, "path": str(destination)}
+        except Exception as exc:
+            return {"ok": False, "error": f"Não foi possível salvar o documento: {exc}"}
+
+    def save_backup(self) -> dict[str, object]:
+        try:
+            import webview  # type: ignore
+
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            selected = self.window.create_file_dialog(
+                webview.SAVE_DIALOG,
+                save_filename=f"Controle_Importacoes_backup_{stamp}.zip",
+                file_types=("Arquivo ZIP (*.zip)",),
+            )
+            destination = save_dialog_path(selected)
+            if destination is None:
+                return {"ok": False, "cancelled": True}
+            if destination.suffix.lower() != ".zip":
+                destination = destination.with_suffix(".zip")
+            source = make_backup()
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+            return {"ok": True, "path": str(destination), "file": destination.name}
+        except Exception as exc:
+            return {"ok": False, "error": f"Não foi possível salvar o backup: {exc}"}
+
+
 def run() -> None:
     init_db()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -661,7 +722,16 @@ def run() -> None:
     try:
         import webview  # type: ignore
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        webview.create_window(APP_NAME, url, width=1280, height=820, min_size=(980, 650))
+        desktop_api = DesktopApi()
+        window = webview.create_window(
+            APP_NAME,
+            url,
+            width=1280,
+            height=820,
+            min_size=(980, 650),
+            js_api=desktop_api,
+        )
+        desktop_api.window = window
         webview.start()
         server.shutdown()
     except ImportError:

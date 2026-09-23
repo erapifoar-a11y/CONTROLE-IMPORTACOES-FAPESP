@@ -1,4 +1,4 @@
-# Controle de Importações FAPESP 0.2.2
+# Controle de Importações FAPESP 0.2.3
 
 Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 
@@ -22,6 +22,12 @@ Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 - o acervo histórico deixou de ser incorporado ao executável e ao repositório;
 - em **Configurações**, o usuário seleciona o arquivo original `IMPORTAÇÕES.zip` para realizar a carga;
 - o pacote destinado ao GitHub permanece pequeno e dentro dos limites de envio.
+
+## Correção da versão 0.2.3
+
+- documentos são salvos por uma janela nativa do Windows, preservando o nome original;
+- o backup abre uma janela para escolher o local do arquivo e confirma o caminho salvo;
+- o botão redundante de backup foi removido da tela **Processos** e mantido somente em **Configurações**.
 
 ## Recursos desta versão
 
