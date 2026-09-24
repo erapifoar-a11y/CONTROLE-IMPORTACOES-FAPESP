@@ -1,4 +1,4 @@
-# Controle de Importações FAPESP 0.2.3
+# Controle de Importações FAPESP 0.2.4
 
 Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 
@@ -28,6 +28,13 @@ Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 - documentos são salvos por uma janela nativa do Windows, preservando o nome original;
 - o backup abre uma janela para escolher o local do arquivo e confirma o caminho salvo;
 - o botão redundante de backup foi removido da tela **Processos** e mantido somente em **Configurações**.
+
+## Correção da versão 0.2.4
+
+- a abertura renderiza somente a tela ativa;
+- a tela **Processos** exibe inicialmente até 20 processos, com carregamento adicional sob demanda;
+- a tela **Importações** só é montada quando acessada e exibe os registros em blocos de 50;
+- os filtros continuam pesquisando em todo o acervo histórico.
 
 ## Recursos desta versão
 
