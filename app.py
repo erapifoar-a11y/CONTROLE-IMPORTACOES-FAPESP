@@ -24,7 +24,7 @@ from pypdf import PdfReader, PdfWriter
 
 
 APP_NAME = "Controle de Importações FAPESP"
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.2.5"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 WEB_DIR = ROOT / "web"
 if os.environ.get("CONTROLE_IMPORTACOES_DATA"):
