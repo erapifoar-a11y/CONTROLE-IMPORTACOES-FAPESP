@@ -28,5 +28,5 @@ jobs:
       - name: Disponibilizar aplicativo
         uses: actions/upload-artifact@v4
         with:
-          name: Controle-Importacoes-FAPESP-0.2.4
+          name: Controle-Importacoes-FAPESP-0.2.5
           path: dist/
