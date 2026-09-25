@@ -18,13 +18,13 @@ from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from pypdf import PdfReader, PdfWriter
 
 
 APP_NAME = "Controle de Importações FAPESP"
-APP_VERSION = "0.2.5"
+APP_VERSION = "0.3.0"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 WEB_DIR = ROOT / "web"
 if os.environ.get("CONTROLE_IMPORTACOES_DATA"):
@@ -139,6 +139,8 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_import_process ON imports(process_id);
+            CREATE INDEX IF NOT EXISTS idx_import_process_opened ON imports(process_id,opened_on DESC,id DESC);
+            CREATE INDEX IF NOT EXISTS idx_import_status_opened ON imports(status,opened_on DESC,id DESC);
             CREATE INDEX IF NOT EXISTS idx_doc_import ON documents(import_id);
             CREATE INDEX IF NOT EXISTS idx_event_import ON events(import_id);
             """
@@ -203,7 +205,9 @@ class Handler(SimpleHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         if path == "/api/session":
             with connect() as con:
                 configured = con.execute("SELECT 1 FROM settings WHERE key='password_hash'").fetchone() is not None
@@ -212,6 +216,16 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/dashboard":
             return self.send_json(self.dashboard())
+        if path == "/api/process-page":
+            return self.send_json(self.process_page(query))
+        if path == "/api/import-page":
+            return self.send_json(self.import_page(query))
+        if path.startswith("/api/processes/") and path.endswith("/imports"):
+            try:
+                process_id = int(path.strip("/").split("/")[2])
+            except (ValueError, IndexError):
+                return self.send_json({"error": "Identificador inválido"}, 400)
+            return self.send_json(self.process_imports(process_id, query))
         if path == "/api/researchers":
             with connect() as con:
                 rows = con.execute("SELECT * FROM researchers WHERE active=1 ORDER BY name").fetchall()
@@ -339,6 +353,90 @@ class Handler(SimpleHTTPRequestHandler):
                     target[item["currency"]] = target.get(item["currency"], Decimal("0")) + Decimal(item["value_amount"])
                 result.append({**dict(proc), "imports": imports, "totals": {k: str(v) for k, v in totals.items()}, "pending_totals": {k: str(v) for k, v in pending.items()}})
         return {"processes": result, "version": APP_VERSION}
+
+    @staticmethod
+    def _page_value(query: dict[str, list[str]], name: str, default: int, maximum: int) -> int:
+        try:
+            return max(1, min(int(query.get(name, [str(default)])[0]), maximum))
+        except (TypeError, ValueError):
+            return default
+
+    def process_page(self, query: dict[str, list[str]]) -> dict:
+        page = self._page_value(query, "page", 1, 100000)
+        size = self._page_value(query, "size", 20, 100)
+        search = query.get("q", [""])[0].strip()
+        status = query.get("status", [""])[0].strip()
+        where = ["p.active=1"]
+        params: list[object] = []
+        import_filters = ["i.process_id=p.id"]
+        if status:
+            import_filters.append("i.status=?")
+        if search:
+            like = f"%{search}%"
+            where.append("(p.number LIKE ? OR r.name LIKE ? OR EXISTS (SELECT 1 FROM imports si WHERE si.process_id=p.id AND (si.exporter LIKE ? OR si.manufacturer LIKE ? OR si.representative LIKE ? OR si.proforma_number LIKE ?)))")
+            params.extend([like] * 6)
+        if status:
+            where.append(f"EXISTS (SELECT 1 FROM imports i WHERE {' AND '.join(import_filters)})")
+            params.append(status)
+        where_sql = " AND ".join(where)
+        with connect() as con:
+            total = con.execute(f"SELECT COUNT(*) FROM processes p JOIN researchers r ON r.id=p.researcher_id WHERE {where_sql}", params).fetchone()[0]
+            rows = con.execute(
+                f"""SELECT p.id,p.number,r.name researcher_name,
+                           (SELECT COUNT(*) FROM imports ci WHERE ci.process_id=p.id) import_count
+                    FROM processes p JOIN researchers r ON r.id=p.researcher_id
+                    WHERE {where_sql} ORDER BY p.number DESC LIMIT ? OFFSET ?""",
+                (*params, size, (page - 1) * size),
+            ).fetchall()
+            processes = []
+            authorized = ("authorized", "execution", "completed")
+            for row in rows:
+                totals = {r[0]: str(r[1]) for r in con.execute(
+                    "SELECT currency,COALESCE(SUM(CAST(value_amount AS REAL)),0) FROM imports WHERE process_id=? AND status IN (?,?,?) GROUP BY currency",
+                    (row["id"], *authorized),
+                ).fetchall()}
+                processes.append({**dict(row), "totals": totals})
+        return {"items": processes, "page": page, "size": size, "total": total, "pages": max(1, (total + size - 1) // size)}
+
+    def process_imports(self, process_id: int, query: dict[str, list[str]]) -> dict:
+        status = query.get("status", [""])[0].strip()
+        search = query.get("q", [""])[0].strip()
+        where = ["i.process_id=?"]
+        params: list[object] = [process_id]
+        if status:
+            where.append("i.status=?")
+            params.append(status)
+        if search:
+            like = f"%{search}%"
+            where.append("(i.exporter LIKE ? OR i.manufacturer LIKE ? OR i.representative LIKE ? OR i.proforma_number LIKE ?)")
+            params.extend([like] * 4)
+        with connect() as con:
+            rows = con.execute(f"SELECT i.* FROM imports i WHERE {' AND '.join(where)} ORDER BY i.opened_on DESC,i.id DESC LIMIT 200", params).fetchall()
+        return {"items": [dict(r) for r in rows]}
+
+    def import_page(self, query: dict[str, list[str]]) -> dict:
+        page = self._page_value(query, "page", 1, 100000)
+        size = self._page_value(query, "size", 50, 100)
+        search = query.get("q", [""])[0].strip()
+        status = query.get("status", [""])[0].strip()
+        where = ["p.active=1"]
+        params: list[object] = []
+        if status:
+            where.append("i.status=?")
+            params.append(status)
+        if search:
+            like = f"%{search}%"
+            where.append("(p.number LIKE ? OR r.name LIKE ? OR i.exporter LIKE ? OR i.manufacturer LIKE ? OR i.representative LIKE ? OR i.proforma_number LIKE ?)")
+            params.extend([like] * 6)
+        where_sql = " AND ".join(where)
+        base = "FROM imports i JOIN processes p ON p.id=i.process_id JOIN researchers r ON r.id=p.researcher_id"
+        with connect() as con:
+            total = con.execute(f"SELECT COUNT(*) {base} WHERE {where_sql}", params).fetchone()[0]
+            rows = con.execute(
+                f"SELECT i.*,p.number process_number,r.name researcher_name {base} WHERE {where_sql} ORDER BY i.opened_on DESC,i.id DESC LIMIT ? OFFSET ?",
+                (*params, size, (page - 1) * size),
+            ).fetchall()
+        return {"items": [dict(r) for r in rows], "page": page, "size": size, "total": total, "pages": max(1, (total + size - 1) // size)}
 
     def suggestions(self) -> dict:
         with connect() as con:

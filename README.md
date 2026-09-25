@@ -1,4 +1,4 @@
-# Controle de Importações FAPESP 0.2.5
+# Controle de Importações FAPESP 0.3.0
 
 Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 
@@ -41,6 +41,15 @@ Aplicativo local para acompanhar importações vinculadas a processos FAPESP.
 - cada processo mostra no máximo 10 importações na carga inicial;
 - listas de sugestões passam a ser carregadas somente ao abrir o cadastro;
 - a tela inicial é liberada antes das estruturas auxiliares de cadastro.
+
+## Reestruturação da versão 0.3.0
+
+- processos e importações são consultados em páginas diretamente no SQLite;
+- a tela Processos carrega apenas resumos e busca suas importações sob demanda;
+- a tela Importações recebe somente 50 registros por página;
+- pesquisas e filtros são executados no banco, sem carregar o acervo inteiro no navegador;
+- voltar do detalhe preserva a lista já carregada;
+- novos índices aceleram consultas por processo, situação e data.
 
 ## Recursos desta versão
 
