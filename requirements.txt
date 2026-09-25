@@ -1,3 +1,1 @@
-pypdf>=5.0,<7
-pywebview>=5.0,<7
-
+# Somente a biblioteca padrão do Python.
